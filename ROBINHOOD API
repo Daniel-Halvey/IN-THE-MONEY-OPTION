@@ -1,0 +1,78 @@
+import time
+import datetime
+import yfinance as yf
+import pandas as pd
+import logging  # Use logging for better error handling
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def get_historical_options_data(symbol, expiry_date):
+    """Fetches historical options data using yfinance."""
+    try:
+        ticker = yf.Ticker(symbol)
+        options = ticker.option_chain(expiry_date)
+        puts = options.puts
+        if puts.empty:
+            logging.info(f"No put options found for {symbol} expiring on {expiry_date}")
+            return pd.DataFrame()
+        return puts
+    except Exception as e:
+        logging.error(f"Error fetching options data for {symbol}: {e}")
+        return pd.DataFrame()
+
+def find_itm_put(options_data, current_price):
+    """Finds an in-the-money put option."""
+    if options_data.empty:
+        return None
+    itm_puts = options_data[options_data['strike'] > current_price]
+    if itm_puts.empty:
+        return None
+    return itm_puts.iloc[0]
+
+def place_order(option_contract, quantity, side="buy", strike=None):
+    """Hypothetical function to place an order."""
+    if strike is not None:
+        logging.info(f"Placing {side} order for {quantity} contracts of {option_contract} with strike price {strike:.2f}")
+    else:
+        logging.info(f"Placing {side} order for {quantity} contracts of {option_contract}")
+    return True
+
+def trading_strategy(symbol="DJT", expiry_days=30, sleep_time=3600): #Added sleep time as a parameter
+    """Buys in-the-money put options."""
+    while True:
+        try:
+            ticker = yf.Ticker(symbol)
+            ticker_info = ticker.info
+            if 'regularMarketPrice' not in ticker_info or ticker_info.get('regularMarketPrice') is None: #Use .get to prevent keyerror
+                logging.warning(f"Could not get current price for {symbol}. Retrying in 60 seconds...")
+                time.sleep(60)
+                continue
+            current_price = ticker_info['regularMarketPrice']
+
+            expiry_date = (datetime.date.today() + datetime.timedelta(days=expiry_days)).strftime("%Y-%m-%d")
+
+            options_data = get_historical_options_data(symbol, expiry_date)
+            if options_data.empty:
+                logging.info(f"No options data found for {symbol} expiring on {expiry_date}. Retrying in {sleep_time/3600} hour(s)...") #Use sleep time variable to display correct time
+                time.sleep(sleep_time)
+                continue
+
+            itm_put = find_itm_put(options_data, current_price)
+
+            if itm_put is not None:
+                strike_price = itm_put['strike']
+                logging.info(f"Current {symbol} Price: {current_price:.2f}")
+                logging.info(f"Found ITM Put Option: Strike={strike_price:.2f}, Last Price={itm_put['lastPrice']:.2f}, Expiry={expiry_date}")
+                place_order(itm_put['contractSymbol'], 1, strike=strike_price)
+            else:
+                logging.info(f"No ITM put options found for {symbol} expiring on {expiry_date}.")
+
+            time.sleep(sleep_time)
+
+        except Exception as e:
+            logging.exception(f"An unhandled error occurred in the main loop: {e}") #Use logging.exception to capture traceback
+            time.sleep(60)
+
+if __name__ == "__main__":
+    trading_strategy()
